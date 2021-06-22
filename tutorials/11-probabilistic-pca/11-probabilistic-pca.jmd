@@ -6,7 +6,7 @@ permalink: /:collection/:name/
 Principal component analysis is a fundamental technique to analyse and visualise data.
 You will have come across it in many forms and names.
 Here, we give a probabilistic perspective on PCA with some biologically motivated examples.
-For more details and a mathematical derivation, we recommend Bishop's textbook (Bishop, Pattern Recognition and Machine Learning)
+For more details and a mathematical derivation, we recommend Bishop's textbook (Christopher M. Bishop, Pattern Recognition and Machine Learning, 2006)
 
 ```julia
 using Turing
@@ -34,7 +34,7 @@ Real life is much more messy.
 
 ```julia
 n_cells = 60
-n_genes = 15
+n_genes = 9
 mu_1 = 10. * ones(n_genes÷3)
 mu_0 = zeros(n_genes÷3)
 S = I(n_genes÷3)
@@ -47,7 +47,7 @@ expression_matrix = transpose(vcat(hcat(rand(mvn_1, n_cells÷2), rand(mvn_0, n_c
                                    hcat(rand(mvn_0, n_cells÷2), rand(mvn_1, n_cells÷2))))
 
 
-df_exp = convert(DataFrame, expression_matrix)
+df_exp = DataFrame(expression_matrix, :auto)
 df_exp[!,:cell] = 1:n_cells
 
 DataFrames.stack(df_exp, 1:n_genes) |>
@@ -93,12 +93,12 @@ end
 ppca = pPCA(expression_matrix)
 
 # Hamiltonian Monte Carlo (HMC) sampler parameters
-n_iterations = 1000
-ϵ = 0.05
-τ = 10
+n_iterations = 300
+# ϵ = 0.05
+# τ = 10
 
 #  It is important to note that although the maximum likelihood estimates of W,\mu in the pPCA model correspond to the PCA subspace, only posterior distributions can be obtained for the latent data (points on the subspace). Neither the mode nor the mean of those distributions corresponds to the PCA points (orthogonal projections of the observations onto the subspace). However what is true, is that the posterior distributions converge to the PCA points as \sigma^2 \rightarrow 0. In other words, the relationship between pPCA and PCA is a bit more subtle than that between least squares and regression.
-chain = sample(ppca, HMC(ϵ, τ), n_iterations)
+chain = sample(ppca, NUTS(0.65), n_iterations)
 
 describe(chain)[1]
 ```
@@ -115,7 +115,7 @@ mu = mean(group(chain, :mean))[:,2]
 
 X = w * z .+ mu
 
-df_rec = convert(DataFrame, X')
+df_rec = DataFrame(X', :auto)
 df_rec[!,:cell] = 1:n_cells
 
 #  #  DataFrames.stack(df_rec, 1:n_genes) |> @vlplot(:rect, "cell:o", "variable:o", color=:value) |> save("reconstruction.pdf")
@@ -142,6 +142,91 @@ df_pro |>  @vlplot(:point, x=:z1, y=:z2, color="type:n")
 
 A common question arising in latent factor models is the choice of components, i.e. how many dimensions are needed to represent that data in the latent space.
 
+```julia
+
+@model pPCA_ARD(x, ::Type{T} = Float64) where {T} = begin
+
+  # Dimensionality of the problem.
+  N, D = size(x)
+
+  # latent variable z
+  z = Matrix{T}(undef, D, N)
+  for n in 1:N
+    z[:, n] ~ MvNormal(D, 1.)
+  end
+
+  # weights/loadings w
+  tau ~ Gamma(1.0, 1.0);
+  alpha = Vector{T}(undef, D)
+  for d in 1:D
+    alpha[d] ~ Gamma(1., 1.)
+  end
+
+  w = Matrix{T}(undef, D, D)
+  for d in 1:D
+    w[d, :] ~ MvNormal(zeros(D), 1. ./ sqrt.(alpha))
+  end
+
+  # mean offset
+  #  mean = Vector{T}(undef, D)
+  #  mean ~ MvNormal(D, 1.0)
+  mu = w * z #.+ mean
+
+  for d in 1:D
+    x[:,d] ~ MvNormal(mu[d,:], 1. / sqrt(tau))
+  end
+
+end
+```
+
+
+```julia
+
+ppca_ARD = pPCA_ARD(expression_matrix)
+
+# Hamiltonian Monte Carlo (HMC) sampler parameters
+n_iterations = 300
+ϵ = 0.05
+τ = 10
+
+#  It is important to note that although the maximum likelihood estimates of W,\mu in the pPCA model correspond to the PCA subspace, only posterior distributions can be obtained for the latent data (points on the subspace). Neither the mode nor the mean of those distributions corresponds to the PCA points (orthogonal projections of the observations onto the subspace). However what is true, is that the posterior distributions converge to the PCA points as \sigma^2 \rightarrow 0. In other words, the relationship between pPCA and PCA is a bit more subtle than that between least squares and regression.
+#  chain = sample(ppca_ARD, HMC(ϵ, τ), n_iterations)
+chain = sample(ppca_ARD, NUTS(0.65), n_iterations)
+
+describe(chain)[1]
+```
+
+```julia
+
+# Extract paramter estimates for plotting - mean of posterior
+w = permutedims(reshape(mean(group(chain, :w))[:,2], (n_genes,n_genes)))
+z = permutedims(reshape(mean(group(chain, :z))[:,2], (n_genes, n_cells)))'
+#  mu = mean(group(chain, :mean))[:,2]
+alpha = mean(group(chain, :alpha))[:,2]
+alpha
+```
+We can inspect alpha to see which elements are small, i.e. have a high relevance.
+
+```julia
+
+X = w[[2,5],[2,5]] * z[[2,5],:]
+
+df_rec = DataFrame(X', :auto)
+df_rec[!,:cell] = 1:n_cells
+
+#  #  DataFrames.stack(df_rec, 1:n_genes) |> @vlplot(:rect, "cell:o", "variable:o", color=:value) |> save("reconstruction.pdf")
+DataFrames.stack(df_rec, 1:2) |> @vlplot(:rect, "cell:o", "variable:o", color=:value)
+
+df_pro = DataFrame(z')
+rename!(df_pro, Symbol.( ["z"*string(i) for i in collect(1:n_genes)]))
+df_pro[!,:cell] = 1:n_cells
+
+DataFrames.stack(df_pro, 1:n_genes) |> @vlplot(:rect, "cell:o", "variable:o", color=:value)
+
+df_pro[!,:type] = repeat([1, 2], inner = n_cells÷2)
+df_pro |>  @vlplot(:point, x=:z2, y=:z5, color="type:n")
+```
+
 ## Batch effects
 
 Finally, a very common issue to address in biological data is batch effects.
@@ -150,6 +235,71 @@ As an example, considers Fisher's famous Iris data set. wikipedia
 
 The data set consists of 50 samples each from three species of Iris (Iris setosa, Iris virginica and Iris versicolor).
 Four features were measured from each sample: the length and the width of the sepals and petals, in centimeters.
+
+```julia
+# Example data set - generate synthetic gene expression data
+using RDatasets
+data = dataset("datasets", "iris")
+species = data[!, "Species"]
+dat = data[!, 1:4]
+n, d = size(dat)
+```
+
+
+```julia
+ppca = pPCA(dat)
+
+# Hamiltonian Monte Carlo (HMC) sampler parameters
+n_iterations = 500
+ϵ = 0.05
+τ = 10
+
+#  It is important to note that although the maximum likelihood estimates of W,\mu in the pPCA model correspond to the PCA subspace, only posterior distributions can be obtained for the latent data (points on the subspace). Neither the mode nor the mean of those distributions corresponds to the PCA points (orthogonal projections of the observations onto the subspace). However what is true, is that the posterior distributions converge to the PCA points as \sigma^2 \rightarrow 0. In other words, the relationship between pPCA and PCA is a bit more subtle than that between least squares and regression.
+chain = sample(ppca, HMC(ϵ, τ), n_iterations)
+
+describe(chain)[1]
+
+# Extract paramter estimates for plotting - mean of posterior
+w = permutedims(reshape(mean(group(chain, :w))[:,2], (d,d)))
+z = permutedims(reshape(mean(group(chain, :z))[:,2], (d, n)))'
+mu = mean(group(chain, :mean))[:,2]
+
+X = w * z .+ mu
+
+df_rec = convert(DataFrame, X')
+df_rec[!,:species] = species
+
+#  DataFrames.stack(df_rec, 1:d) |> @vlplot(:rect, "species:o", "variable:o", color=:value)
+
+df_pro = DataFrame(z')
+rename!(df_pro, Symbol.( ["z"*string(i) for i in collect(1:d)]))
+df_pro[!,:sample] = 1:n
+df_pro[!,:species] = species
+
+df_pro |>  @vlplot(:point, x=:z1, y=:z2, color="species:n")
+```
+
+
+
+```julia
+## Introduce batch effect
+batch = rand(Binomial(1, 0.5), 150)
+effect = rand(Normal(2.5, 0.5), 150)
+batch_dat = dat .+ batch .* effect
+
+ppca_batch = pPCA(batch_dat)
+chain = sample(ppca_batch, HMC(ϵ, τ), n_iterations)
+describe(chain)[1]
+
+z = permutedims(reshape(mean(group(chain, :z))[:,2], (d, n)))'
+df_pro = DataFrame(z')
+rename!(df_pro, Symbol.( ["z"*string(i) for i in collect(1:d)]))
+df_pro[!,:sample] = 1:n
+df_pro[!,:species] = species
+df_pro[!,:batch] = batch
+
+df_pro |>  @vlplot(:point, x=:z1, y=:z2, color="species:n", shape=:batch)
+```
 
 
 ```julia, echo=false, skip="notebook"
