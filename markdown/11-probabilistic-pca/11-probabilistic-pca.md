@@ -27,10 +27,9 @@ Random.seed!(1789);
 
 
 
-## A basic PCA example
+## A basic example
 
-The idea of pPCA is to find a latent variable $z$ that can be used to describe
-hidden structure in our dataset.
+The idea of PCA is to find a latent variable $z$ that can be used to describe hidden structure in our dataset.
 We use a simple Gaussian prior for
 $$
 P(z) = \mathcal{N}(z | 0, I)
@@ -41,21 +40,21 @@ P(x | z) = \mathcal{N}(x | W z + \mu, \sigma^2 I)
 $$
 is modeled via a Gaussian distribution.
 
-### Simulate data (a biologically motivated example)
+### A biologically motivated example
 
 We'll generate synthetic data to explore the models.
 The simulation is inspired by biological measurement of
-expression of genes in cells, and so you can think of the two dimensions as cells and genes.
-While the human genome is (mostly) identical between all the cells in your body, there exist interesting differences in gene expression in different human tissues.
+expression of genes in cells, and so you can think of the two variables as cells and genes.
+While the human genome is (mostly) identical between all the cells in your body, there exist interesting differences in gene expression in different human tissues and disease conditions.
 Similarly, one way to investigate certain diseases is to look at differences in gene expression in cells from patients and healthy controls (usually from the same tissue).
 
 Usually, we can assume that the changes in gene expression only affect a subset of all genes (and these can be linked to diseases in some way).
 One of the challenges of this kind of data is to see the underlying structure, e.g. to make the connection between a certain state (healthy/disease) and gene expression.
-The problem is that the space we are investigating is very large (Up to 20000 genes across 1000s of cells). So in order to find structure in this data, we usually need to project the data into a lower dimensional subspace.
+The problem is that the space we are investigating is very large (Up to 20000 genes across 1000s of cells). So in order to find structure in this data, we usually need to project the data into a lower dimensional space.
 
 Here, we simulate this problem. Admittedly, this is a very simplistic example with far fewer cells and genes and a very straighforward relationship. We try to capture the essence of the problem, but then, unfortunately, real life problems tend to be much more messy.
 
-If you are not that interested in the biology, the more abstract problem formulation is to project a high-dimensional space onto a different space - in the case of PCA - a space where most of the variation is concentrated in the first few dimensions. So you will use PCA to explore underlying structure in your data that is not necessarily obvious from looking at the raw data itself. Or in mathematical terms, we aim to find the latent variable $z$.
+If you are not that interested in the biology, the more abstract problem formulation is to project a high-dimensional space onto a different space - in the case of PCA - a space where most of the variation is concentrated in the first few dimensions. So you will use PCA to explore underlying structure in your data that is not necessarily obvious from looking at the raw data itself.
 
 ```julia
 n_cells = 60
@@ -66,7 +65,8 @@ S = I(n_genes÷3)
 mvn_0 = MvNormal(mu_0, S)
 mvn_1 = MvNormal(mu_1, S)
 
-# create a diagonal block like expression matrix, with some non-informative genes (remember not all features/genes are informative, some might just not differ very much between cells)
+# create a diagonal block like expression matrix, with some non-informative genes;
+# not all features/genes are informative, some might just not differ very much between cells)
 expression_matrix = transpose(vcat(
   hcat(rand(mvn_1, n_cells÷2),
        rand(mvn_0, n_cells÷2)),
@@ -80,15 +80,20 @@ df_exp = DataFrame(expression_matrix, :auto)
 df_exp[!,:cell] = 1:n_cells
 
 DataFrames.stack(df_exp, 1:n_genes) |>
-    @vlplot(:rect, x="cell:o", color=:value, encoding={y={field="variable", type="nominal", sort="-x",
-    axis={title="gene"}}})
+    @vlplot(:rect, x="cell:o", color=:value,
+      encoding={y={field="variable",
+                   type="nominal",
+                   sort="-x",
+                   axis={title="gene"}
+                  }
+               })
 ```
 
 ![](figures/11-probabilistic-pca_2_1.png)
 
 
 
-Here, you see the simulated data. You can see two groups of cells that differ in the expression of genes. While the difference between the two groups of cells here is fairly obvious from looking at the raw data, in practice and with large enough data sets, it is often impossible to spot the differences from the raw data alone.
+Here, you see the simulated data. You can see two groups of cells that differ in the expression of genes. While the difference between the two groups of cells here is fairly obvious from looking at the raw data, in practice and with large enough data sets, it is often impossible to spot the differences from the raw data alone. If you have some patience and compute ressources you can increase the size of the dataset, or play around with the noise levels to make the problem increasingly harder.
 
 ### pPCA model
 ```julia
@@ -124,10 +129,7 @@ end;
 
 ### pPCA inference
 
-It is important to note that although the maximum likelihood estimates of W,\mu in the pPCA model correspond to the PCA subspace,
-only posterior distributions can be obtained for the latent data (points on the subspace).
-Neither the mode nor the mean of those distributions corresponds to the PCA points (orthogonal projections of the observations onto the subspace).
-However what is true, is that the posterior distributions converge to the PCA points as \sigma^2 \rightarrow 0. This is relevant when comparing the following results with that obtained from running a non-probabilistic PCA (via maximum-likelihood estimation)
+Here, we run the inference with the NUTS sampler. Feel free to try different samplers.
 
 ```julia
 ppca = pPCA(expression_matrix)
@@ -139,10 +141,9 @@ chain = sample(ppca, NUTS(), MCMCThreads(), n_iterations, 1);
 
 
 
-### pPCA sanity check
+### pPCA control
 
-A quick sanity check.
-We try to reconstruct the input data from our parameter estimates.
+A quick sanity check. We reconstruct the input data from our parameter estimates, using the posterior mean as parameter estimates.
 
 ```julia
 # Extract paramter estimates for plotting - mean of posterior
@@ -157,8 +158,13 @@ df_rec = DataFrame(X', :auto)
 df_rec[!,:cell] = 1:n_cells
 
 DataFrames.stack(df_rec, 1:n_genes) |>
-    @vlplot(:rect, x="cell:o", color=:value, encoding={y={field="variable", type="nominal", sort="-x",
-    axis={title="gene"}}})
+    @vlplot(:rect, x="cell:o", color=:value,
+    encoding={y={field="variable",
+                 type="nominal",
+                 sort="-x",
+                 axis={title="gene"}
+                }
+             })
 ```
 
 ![](figures/11-probabilistic-pca_5_1.png)
@@ -170,36 +176,29 @@ This is what we expect, as PCA is essentially a lossless transformation, i.e. th
 And finally, we plot the data in a lower dimensional space. The interesting insight here is that we can project the information from the input space into a two-dimensional representation, without lossing the essential information about the two groups of cells in the input data.
 
 ```julia
-df_pca = DataFrame(z')
+df_pca = DataFrame(z', :auto)
 rename!(df_pca, Symbol.( ["z"*string(i) for i in collect(1:n_genes)]))
 df_pca[!,:cell] = 1:n_cells
 
-DataFrames.stack(df_pca, 1:n_genes) |> @vlplot(:rect, "cell:o", "variable:o", color=:value)
+DataFrames.stack(df_pca, 1:n_genes) |>
+  @vlplot(:rect, "cell:o", "variable:o", color=:value)
 
 df_pca[!,:type] = repeat([1, 2], inner = n_cells÷2)
 df_pca |>  @vlplot(:point, x=:z1, y=:z2, color="type:n")
 ```
 
-```
-Error: ArgumentError: `DataFrame` constructor from a `Matrix` requires pass
-ing :auto as a second argument to automatically generate column names: `Dat
-aFrame(matrix, :auto)`
-```
+![](figures/11-probabilistic-pca_6_1.png)
 
 
-
-
-
-We can see the two groups are relatively well separated, even though we are only looking at a
-two-dimensional subspace.
+We can see the two groups are well separated in this 2-D space. Another way to put it, 2 dimensions is enough to display the main structure of the data.
 
 
 ## Number of components
 
-A common question arising in latent factor models is the choice of components,
-i.e. how many dimensions are needed to represent that data in the latent space.
+A direct question arises from this is: How many dimensions do we want to keep in order to represent the latent structure in the data?
+This is a very central question for all latent factor models, i.e. how many dimensions are needed to represent that data in the latent space.
 In the case of PCA, there exist a lot of heuristics to make that choice.
-By using the pPCA model, this can be accomplished very elegantly, with a technique called *Automatic-Relevance-Determination*.
+By using the pPCA model, this can be accomplished very elegantly, with a technique called *Automatic Relevance Determination*(ARD).
 Essentially, we are using a specific prior over the factor loadings W that allows us to prune away dimensions in the
 latent space. The prior is determined by a precision hyperparameter $\alpha$. Here, smaller values of $\alpha$ correspond to more important components.
 You can find more details about this in the Bishop book mentioned in the introduction.
@@ -251,8 +250,7 @@ StatsPlots.plot(group(chain, :alpha))
 
 
 
-Here we look at the convergence of the chains for the alpha parameter. We can see that the chains have
-converged and the posterior of the alpha parameters is centered around much smaller values in two instances. Below, we will use the mean of the small values to select the *relevant* dimensions - we can clearly see based on the values of $\alpha$ that there should be two dimensions in this example.
+Here we look at the convergence of the chains for the $\alpha$ parameter. This parameter determines the relevance of individual components. We can see that the chains have converged and the posterior of the alpha parameters is centered around much smaller values in two instances. Below, we will use the mean of the small values to select the *relevant* dimensions - we can clearly see based on the values of $\alpha$ that there should be two dimensions in this example.
 
 ```julia
 # Extract paramter estimates for plotting - mean of posterior
@@ -290,7 +288,7 @@ df_rec[!,:cell] = 1:n_cells
 #  #  DataFrames.stack(df_rec, 1:n_genes) |> @vlplot(:rect, "cell:o", "variable:o", color=:value) |> save("reconstruction.pdf")
 DataFrames.stack(df_rec, 1:2) |> @vlplot(:rect, "cell:o", "variable:o", color=:value)
 
-df_pre = DataFrame(z')
+df_pre = DataFrame(z', :auto)
 rename!(df_pre, Symbol.( ["z"*string(i) for i in collect(1:n_genes)]))
 df_pre[!,:cell] = 1:n_cells
 
@@ -300,30 +298,24 @@ df_pre[!,:type] = repeat([1, 2], inner = n_cells÷2)
 df_pre[!,:ard1] = df_pre[:, alpha_indices[1]]
 df_pre[!,:ard2] = df_pre[:, alpha_indices[2]]
 df_pre |>  @vlplot(:point, x=:ard1, y=:ard2, color="type:n")
-
-This plot is very similar to the low-dimensional plot above, but choosing the *relevant* dimensions based on the values of $\alpha$.
 ```
 
-```
-Error: ArgumentError: `DataFrame` constructor from a `Matrix` requires pass
-ing :auto as a second argument to automatically generate column names: `Dat
-aFrame(matrix, :auto)`
-```
+![](figures/11-probabilistic-pca_10_1.png)
 
 
 
-
+This plot is very similar to the low-dimensional plot above, but choosing the *relevant* dimensions based on the values of $\alpha$. When you are in doubt about the number of dimensions to project onto, ARD might provide an answer to that question.
 
 ## Batch effects
 
-Finally, a very common issue to address in biological data is [batch effects](https://en.wikipedia.org/wiki/Batch_effec).
+A second, common aspect apart from the dimensionality of the PCA space, is the issue of confounding factors or [batch effects](https://en.wikipedia.org/wiki/Batch_effect).
 A batch effect occurs when non-biological factors in an experiment cause changes in the data produced by the experiment.
 As an example, we will look at Fisher's famous Iris data set.
 
 The data set consists of 50 samples each from three species of Iris (Iris setosa, Iris virginica and Iris versicolor).
 Four features were measured from each sample: the length and the width of the sepals and petals, in centimeters. [RDatasets.jl](https://github.com/JuliaStats/RDatasets.jl) contains the Iris dataset.
 
-An example for a batch effect in this case might be two different scientists using a different measurement method to determine the length and width of the flowers. This can lead to a systematic bias in the measurement unrelated to the actual experimental variable - the species in this case.
+An example for a batch effect in this case might be different scientists using a different measurement method to determine the length and width of the flowers. This can lead to a systematic bias in the measurement unrelated to the actual experimental variable - the species in this case.
 
 ```julia
 # Example data set - generate synthetic gene expression data
@@ -336,13 +328,8 @@ species = data[!, "Species"]
 d = 4
 dat = data[!, 1:d]
 # and the number of measurements
-n = size(dat)[1]
+n = size(dat)[1];
 ```
-
-```
-150
-```
-
 
 
 
@@ -383,7 +370,7 @@ df_iris |>  @vlplot(:point, x=:z1, y=:z2, color="species:n")
 ![](figures/11-probabilistic-pca_12_1.png)
 
 
-We can see that the setosa species is more clearly separated from the other two species, who overlap
+We can see that the setosa species is more clearly separated from the other two species, which overlap
 considerably.
 
 We now simulate a batch effect; imagine the person taking the measurement uses two different rulers and they are slightly off.
@@ -401,7 +388,7 @@ chain = sample(ppca_batch, HMC(ϵ, τ), 500)
 describe(chain)[1]
 
 z = permutedims(reshape(mean(group(chain, :z))[:,2], (d, n)))'
-df_pre = DataFrame(z')
+df_pre = DataFrame(z', :auto)
 rename!(df_pre, Symbol.( ["z"*string(i) for i in collect(1:d)]))
 df_pre[!,:sample] = 1:n
 df_pre[!,:species] = species
@@ -410,20 +397,14 @@ df_pre[!,:batch] = batch
 df_pre |>  @vlplot(:point, x=:z1, y=:z2, color="species:n", shape=:batch)
 ```
 
-```
-Error: ArgumentError: `DataFrame` constructor from a `Matrix` requires pass
-ing :auto as a second argument to automatically generate column names: `Dat
-aFrame(matrix, :auto)`
-```
-
-
+![](figures/11-probabilistic-pca_13_1.png)
 
 
 The batch effect makes it much harder to distinguish the species. And importantly, if we are not aware of the
 batches, this might lead us to make wrong conclusions about the data.
 
 In order to correct for the batch effect, we need to know about the assignment of measurement to batch.
-In our example, this means knowing which ruler was used for which measurement.
+In our example, this means knowing which ruler was used for which measurement, here encoded via the batch variable.
 
 ```julia
 @model function pPCA_residual(x, batch, ::Type{T} = Float64) where {T}
@@ -470,7 +451,7 @@ This model is described in considerably more detail [here](https://arxiv.org/abs
 ```julia
 
 z = permutedims(reshape(mean(group(chain, :z))[:,2], (d, n)))'
-df_post = DataFrame(z')
+df_post = DataFrame(z', :auto)
 rename!(df_post, Symbol.( ["z"*string(i) for i in collect(1:d)]))
 df_post[!,:sample] = 1:n
 df_post[!,:species] = species
@@ -479,13 +460,7 @@ df_post[!,:batch] = batch
 df_post |>  @vlplot(:point, x=:z1, y=:z2, color="species:n", shape=:batch)
 ```
 
-```
-Error: ArgumentError: `DataFrame` constructor from a `Matrix` requires pass
-ing :auto as a second argument to automatically generate column names: `Dat
-aFrame(matrix, :auto)`
-```
-
-
+![](figures/11-probabilistic-pca_15_1.png)
 
 
 
