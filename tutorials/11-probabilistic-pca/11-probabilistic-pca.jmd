@@ -133,7 +133,7 @@ chain = sample(ppca, NUTS(), MCMCThreads(), n_iterations, 1);
 A quick sanity check. We reconstruct the input data from our parameter estimates, using the posterior mean as parameter estimates.
 
 ```julia
-# Extract paramter estimates for plotting - mean of posterior
+# Extract parameter estimates for plotting - mean of posterior
 w = permutedims(reshape(mean(group(chain, :w))[:,2], (n_genes, n_genes)))
 z = permutedims(reshape(mean(group(chain, :z))[:,2], (n_genes, n_cells)))'
 mu = mean(group(chain, :mean))[:,2]
