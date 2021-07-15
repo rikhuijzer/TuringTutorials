@@ -89,16 +89,12 @@ Here, you see the simulated data. You can see two groups of cells that differ in
 
 ### pPCA model
 ```julia
-@model function pPCA(x, ::Type{T} = Float64) where {T}
-
+@model function pPCA(x, ::Type{TV} = Matrix{Float64}) where {TV}
   # Dimensionality of the problem.
   N, D = size(x)
 
   # latent variable z
-  z = Matrix{T}(undef, D, N)
-  for n in 1:N
-    z[:, n] ~ MvNormal(D, 1.)
-  end
+  z ~ filldist(Normal(), D, N)
 
   # weights/loadings W
   w = Matrix{T}(undef, D, D)
@@ -110,9 +106,8 @@ Here, you see the simulated data. You can see two groups of cells that differ in
   mean ~ MvNormal(D, 1.0)
   mu = w * z .+ mean
   for d in 1:D
-    x[:,d] ~ MvNormal(mu[d,:], 1.)
+    x[:,d] ~ MvNormal(mu[:,d], 1.)
   end
-
 end;
 ```
 
@@ -185,34 +180,26 @@ You can find more details about this in the Bishop book mentioned in the introdu
 
 ```julia
 @model function pPCA_ARD(x, ::Type{T} = Float64) where {T}
-
   # Dimensionality of the problem.
   N, D = size(x)
 
   # latent variable z
-  z = Matrix{T}(undef, D, N)
-  for n in 1:N
-    z[:, n] ~ MvNormal(D, 1.)
-  end
+  z ~ filldist(Normal(), D, N)
 
   # weights/loadings w with Automatic Relevance Determination part
-  alpha = Vector{T}(undef, D)
-  for d in 1:D
-    alpha[d] ~ Gamma(1., 1.)
-  end
+  alpha ~ filldist(Gamma(1., 1.), D)
 
   w = Matrix{T}(undef, D, D)
   for d in 1:D
-    w[d, :] ~ MvNormal(zeros(D), 1. ./ sqrt.(alpha))
+    w[:, d] ~ MvNormal(zeros(D), 1. ./ sqrt.(alpha))
   end
 
   mu = w * z
 
   tau ~ Gamma(1.0, 1.0);
   for d in 1:D
-    x[:,d] ~ MvNormal(mu[d,:], 1. / sqrt(tau))
+    x[:,d] ~ MvNormal(mu[:, d], 1. / sqrt(tau))
   end
-
 end;
 ```
 ```julia
@@ -297,7 +284,7 @@ n_iterations = 500
 
 chain = sample(ppca, HMC(ϵ, τ), n_iterations)
 
-# Extract paramter estimates for plotting - mean of posterior
+# Extract parameter estimates for plotting - mean of posterior
 w = permutedims(reshape(mean(group(chain, :w))[:,2], (d,d)))
 z = permutedims(reshape(mean(group(chain, :z))[:,2], (d, n)))'
 mu = mean(group(chain, :mean))[:,2]
@@ -355,16 +342,10 @@ In our example, this means knowing which ruler was used for which measurement, h
   N, D = size(x)
 
   # latent variable z
-  z = Matrix{T}(undef, D, N)
-  for n in 1:N
-    z[:, n] ~ MvNormal(D, 1.)
-  end
+  z ~ filldist(Normal(), D, N)
 
   # weights/loadings w
-  w = Matrix{T}(undef, D, D)
-  for d in 1:D
-    w[d, :] ~ MvNormal(D, 1.)
-  end
+  w ~ filldist(Normal(), D, D)
 
   # covariate vector
   w_batch = Vector{T}(undef, D)
@@ -376,7 +357,7 @@ In our example, this means knowing which ruler was used for which measurement, h
   mu = w * z .+ mean + w_batch .* batch'
 
   for d in 1:D
-    x[:,d] ~ MvNormal(mu[d,:], 1.)
+    x[:,d] ~ MvNormal(mu[:,d], 1.)
   end
 
 end;
