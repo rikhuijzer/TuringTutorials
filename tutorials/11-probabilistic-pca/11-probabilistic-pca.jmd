@@ -85,7 +85,7 @@ DataFrames.stack(df_exp, 1:n_genes) |>
                })
 ```
 
-Here, you see the simulated data. You can see two groups of cells that differ in the expression of genes. While the difference between the two groups of cells here is fairly obvious from looking at the raw data, in practice and with large enough data sets, it is often impossible to spot the differences from the raw data alone. If you have some patience and compute ressources you can increase the size of the dataset, or play around with the noise levels to make the problem increasingly harder.
+Here, you see the simulated data. You can see two groups of cells that differ in the expression of genes. While the difference between the two groups of cells here is fairly obvious from looking at the raw data, in practice and with large enough data sets, it is often impossible to spot the differences from the raw data alone. If you have some patience and compute resources you can increase the size of the dataset, or play around with the noise levels to make the problem increasingly harder.
 
 ### pPCA model
 ```julia
