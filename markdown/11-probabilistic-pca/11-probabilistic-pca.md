@@ -93,34 +93,34 @@ DataFrames.stack(df_exp, 1:n_genes) |>
 
 
 
-Here, you see the simulated data. You can see two groups of cells that differ in the expression of genes. While the difference between the two groups of cells here is fairly obvious from looking at the raw data, in practice and with large enough data sets, it is often impossible to spot the differences from the raw data alone. If you have some patience and compute ressources you can increase the size of the dataset, or play around with the noise levels to make the problem increasingly harder.
+Here, you see the simulated data. You can see two groups of cells that differ in the expression of genes. While the difference between the two groups of cells here is fairly obvious from looking at the raw data, in practice and with large enough data sets, it is often impossible to spot the differences from the raw data alone. If you have some patience and compute resources you can increase the size of the dataset, or play around with the noise levels to make the problem increasingly harder.
 
 ### pPCA model
 ```julia
-@model function pPCA(x, ::Type{T} = Float64) where {T}
-
+@model function pPCA(x, ::Type{TV} = Array{Float64}) where {TV}
   # Dimensionality of the problem.
   N, D = size(x)
 
   # latent variable z
-  z = Matrix{T}(undef, D, N)
-  for n in 1:N
-    z[:, n] ~ MvNormal(D, 1.)
-  end
+  z ~ filldist(Normal(0.0, 1.0), D, N)
+
+  # side note for the curious
+  # we use the more concise filldist syntax partly for compactness, but also for compatibility with other AD
+  # backends, see the [Turing Performance Tipps](https://turing.ml/dev/docs/using-turing/performancetips)
+  # w = TV{2}(undef, D, D)
+  # for d in 1:D
+  #  w[d, :] ~ MvNormal(D, 1.)
+  # end
 
   # weights/loadings W
-  w = Matrix{T}(undef, D, D)
-  for d in 1:D
-    w[d, :] ~ MvNormal(D, 1.)
-  end
+  w ~ filldist(Normal(0.0, 1.0), D, D)
 
   # mean offset
-  mean ~ MvNormal(D, 1.0)
-  mu = w * z .+ mean
+  m ~ MvNormal(D, 1.0)
+  mu = (w * z .+ m)'
   for d in 1:D
-    x[:,d] ~ MvNormal(mu[d,:], 1.)
+    x[:,d] ~ MvNormal(mu[:,d], 1.)
   end
-
 end;
 ```
 
@@ -133,8 +133,7 @@ Here, we run the inference with the NUTS sampler. Feel free to try different sam
 
 ```julia
 ppca = pPCA(expression_matrix)
-n_iterations = 300
-chain = sample(ppca, NUTS(), MCMCThreads(), n_iterations, 1);
+chain = sample(ppca, NUTS(), 500);
 ```
 
 
@@ -146,13 +145,12 @@ chain = sample(ppca, NUTS(), MCMCThreads(), n_iterations, 1);
 A quick sanity check. We reconstruct the input data from our parameter estimates, using the posterior mean as parameter estimates.
 
 ```julia
-# Extract paramter estimates for plotting - mean of posterior
+# Extract parameter estimates for plotting - mean of posterior
 w = permutedims(reshape(mean(group(chain, :w))[:,2], (n_genes, n_genes)))
 z = permutedims(reshape(mean(group(chain, :z))[:,2], (n_genes, n_cells)))'
-mu = mean(group(chain, :mean))[:,2]
+mu = mean(group(chain, :m))[:,2]
 
 X = w * z .+ mu
-X = w * z
 
 df_rec = DataFrame(X', :auto)
 df_rec[!,:cell] = 1:n_cells
@@ -205,43 +203,30 @@ You can find more details about this in the Bishop book mentioned in the introdu
 
 
 ```julia
-@model function pPCA_ARD(x, ::Type{T} = Float64) where {T}
-
+@model function pPCA_ARD(x, ::Type{TV} = Array{Float64}) where {TV}
   # Dimensionality of the problem.
   N, D = size(x)
 
   # latent variable z
-  z = Matrix{T}(undef, D, N)
-  for n in 1:N
-    z[:, n] ~ MvNormal(D, 1.)
-  end
+  z ~ filldist(Normal(), D, N)
 
   # weights/loadings w with Automatic Relevance Determination part
-  alpha = Vector{T}(undef, D)
-  for d in 1:D
-    alpha[d] ~ Gamma(1., 1.)
-  end
+  alpha ~ filldist(Gamma(1., 1.), D)
+  w ~ filldist(MvNormal(1. ./ sqrt.(alpha)), D)
 
-  w = Matrix{T}(undef, D, D)
-  for d in 1:D
-    w[d, :] ~ MvNormal(zeros(D), 1. ./ sqrt.(alpha))
-  end
-
-  mu = w * z
+  mu = (w * z)'
 
   tau ~ Gamma(1.0, 1.0);
   for d in 1:D
-    x[:,d] ~ MvNormal(mu[d,:], 1. / sqrt(tau))
+    x[:,d] ~ MvNormal(mu[:, d], 1. / sqrt(tau))
   end
-
 end;
 ```
 
 
 ```julia
 ppca_ARD = pPCA_ARD(expression_matrix)
-n_iterations = 400
-chain = sample(ppca_ARD, NUTS(), MCMCThreads(), n_iterations, 1)
+chain = sample(ppca_ARD, NUTS(), 500)
 
 StatsPlots.plot(group(chain, :alpha))
 ```
@@ -262,15 +247,15 @@ z = permutedims(reshape(mean(group(chain, :z))[:,2], (n_genes, n_cells)))'
 
 ```
 9-element Vector{Float64}:
- 3.447150319289705
- 0.07532134194323332
- 0.07754397424990225
- 3.6029909065586874
- 3.4102919134808274
- 3.4895349964035596
- 3.380911472677809
- 3.507756238668494
- 3.5031739081430793
+ 0.25576143792759143
+ 0.2581926916026036
+ 0.27122756902110895
+ 4.357986513425213
+ 3.9485910549054957
+ 4.3886567845446125
+ 0.27628194041153903
+ 0.2623082444567099
+ 0.25699286794405307
 ```
 
 
@@ -339,18 +324,16 @@ First, let's look at the original data using the pPCA model.
 ```julia
 ppca = pPCA(dat)
 
-# Here we use a different samples, we don't always have to use NUTS:
+# Here we use a different sampler, we don't always have to use NUTS:
 # Hamiltonian Monte Carlo (HMC) sampler parameters
-n_iterations = 500
 ϵ = 0.05
 τ = 10
+chain = sample(ppca, HMC(ϵ, τ), 1000)
 
-chain = sample(ppca, HMC(ϵ, τ), n_iterations)
-
-# Extract paramter estimates for plotting - mean of posterior
+# Extract parameter estimates for plotting - mean of posterior
 w = permutedims(reshape(mean(group(chain, :w))[:,2], (d,d)))
 z = permutedims(reshape(mean(group(chain, :z))[:,2], (d, n)))'
-mu = mean(group(chain, :mean))[:,2]
+mu = mean(group(chain, :m))[:,2]
 
 X = w * z
 # X = w * z .+ mu
@@ -384,7 +367,7 @@ effect = rand(Normal(2.4, 0.6), 150)
 batch_dat = dat .+ batch .* effect
 
 ppca_batch = pPCA(batch_dat)
-chain = sample(ppca_batch, HMC(ϵ, τ), 500)
+chain = sample(ppca_batch, HMC(ϵ, τ), 1000)
 describe(chain)[1]
 
 z = permutedims(reshape(mean(group(chain, :z))[:,2], (d, n)))'
@@ -407,34 +390,28 @@ In order to correct for the batch effect, we need to know about the assignment o
 In our example, this means knowing which ruler was used for which measurement, here encoded via the batch variable.
 
 ```julia
-@model function pPCA_residual(x, batch, ::Type{T} = Float64) where {T}
+@model function pPCA_residual(x, batch, ::Type{TV} = Array{Float64}) where {TV}
 
   # Dimensionality of the problem.
   N, D = size(x)
 
   # latent variable z
-  z = Matrix{T}(undef, D, N)
-  for n in 1:N
-    z[:, n] ~ MvNormal(D, 1.)
-  end
+  z ~ filldist(Normal(), D, N)
 
   # weights/loadings w
-  w = Matrix{T}(undef, D, D)
-  for d in 1:D
-    w[d, :] ~ MvNormal(D, 1.)
-  end
+  w ~ filldist(Normal(), D, D)
 
   # covariate vector
-  w_batch = Vector{T}(undef, D)
+  w_batch = TV{1}(undef, D)
   w_batch ~ MvNormal(D, 1.)
 
   # mean offset
-  mean = Vector{T}(undef, D)
-  mean ~ MvNormal(D, 1.0)
-  mu = w * z .+ mean + w_batch .* batch'
+  m = TV{1}(undef, D)
+  m ~ MvNormal(D, 1.0)
+  mu = m .+ w * z + w_batch .* batch'
 
   for d in 1:D
-    x[:,d] ~ MvNormal(mu[d,:], 1.)
+    x[:,d] ~ MvNormal(mu'[:,d], 1.)
   end
 
 end;
