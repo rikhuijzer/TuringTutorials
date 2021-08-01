@@ -30,21 +30,15 @@ function write_test_tutorial(folder::String, should_fail::Bool)
 end
 
 @testset "build.jl" begin
-    test_folder = "99-test"
+    folder = "99-test"
 
     should_fail = false
-    write_test_tutorial(test_folder, should_fail)
-    @test build(test_folder)
-    markdown = TuringTutorials.markdown_output(test_folder)
+    write_test_tutorial(folder, should_fail)
+    @test build(folder)
+    markdown = TuringTutorials.markdown_output(folder)
     @test contains(markdown, "2")
 
     should_fail = true
-    write_test_tutorial(test_folder, should_fail)
-    @test !build(test_folder)
-
-    for dir in ["html", "markdown", "notebook", "script", "tutorials"]
-        path = joinpath(TuringTutorials.REPO_DIR, dir, test_folder)
-        rm(dir; force=true, recursive=true)
-    end
-    @test !isdir(joinpath(TuringTutorials, "html", test_folder))
+    write_test_tutorial(folder, should_fail)
+    @test !build(folder)
 end
