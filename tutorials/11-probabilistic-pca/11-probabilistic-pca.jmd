@@ -380,7 +380,7 @@ We can now see, that the data are better separated in the latent space by accoun
 
 ## Rotation Invariant Householder Parameterization for Bayesian PCA
 
-While PCA is a very old technique, nevertheless, it is still object of more recent research. Here, we
+While PCA is a very old technique, nevertheless, it is still object of current research. Here, we
 demonstrate this by implementing a recent publication that removes the rotational symmetry from the posterior,
 thus speeding up inference. For more details, please read the
 [original publication](http://proceedings.mlr.press/v97/nirwan19a.html)
@@ -432,7 +432,7 @@ end
   @assert K <= D
 
   # parameters
-  sigma_noise ~ Normal(1.0, 0.5)
+  sigma_noise ~ Normal(1.0, 0.3)
   v ~ filldist(Normal(0.0, 1.0), Int(D*K - K*(K-1)/2))
   sigma ~ filldist(LogNormal(0, 1.0), K)
 
@@ -466,7 +466,6 @@ end
   L_full = zeros(T, D, D)
   L_full += L * transpose(L)
   # fix numerical instability (non-posdef matrix)
-  tril!(L_full)
   for d in 1:D
     for k in (d+1):D
       L_full[d,k] = L_full[k,d]
@@ -478,8 +477,8 @@ end;
 
 # Dimensionality of latent space
 Q=2
+n_samples=400
 ppca_householder = pPCA_householder(dat, Q)
-n_samples=300
 chain = sample(ppca_householder, HMC(0.05, 30), n_samples);
 
 # Extract mean of v from chain
@@ -493,7 +492,7 @@ W_n = U_n * (LinearAlgebra.I(Q) .* sigma)
 
 # Create array with projected values
 z = W_n' * transpose(Matrix(dat))
-df_post = DataFrame(z', :auto)
+df_post = DataFrame(convert(Array{Float64}, z)', :auto)
 rename!(df_post, Symbol.( ["z"*string(i) for i in collect(1:Q)]))
 df_post[!,:sample] = 1:n
 df_post[!,:species] = species
@@ -501,8 +500,7 @@ df_post[!,:species] = species
 df_post |> @vlplot(:point, x=:z1, y=:z2, color="species:n")
 ```
 
-We can see that the inference is faster.
-Below, we try to capture the uncertainity in our estimates.
+We observe a speedup in inference, and similar results to the previous implementations. Finally, we will look at the uncertainity that is associated with the samples. We will do this by sampling from the posterior projections. In order to do so, we need to apply some normalizations to the projections.
 
 ```julia
 ## Create data projections for each step of chain
@@ -526,6 +524,7 @@ for d in 1:Q
 end
 
 samples = Array{Float64}(undef, Q, N, n_samples)
+samples_raw = Array{Float64}(undef, Q, N, n_samples)
 for i in 1:n_samples
   U_ni = orthogonal_matrix(D, Q, vv_mat[i,:,:])
   W_ni = U_ni * (LinearAlgebra.I(Q) .* sigma[:,i])
@@ -547,34 +546,63 @@ for i in 1:n_samples
   rot = [[cos(θ), -sin(θ)] [sin(θ), cos(θ)]]
   z_norm_proj_align_n = rot * z_norm_proj_n
 
-  #  samples[:,:,i] = z_n
+  samples_raw[:,:,i] = z_n
   samples[:,:,i] = z_norm_proj_align_n
 end
-#
+
 # initialize a 3D plot with 1 empty series
 plt = plot(
     [100, 200, 300],
     xlim = (-2.00, 2.00),
     ylim = (-2.00, 2.00),
-    group = ["Setosa", "versi", "visi"],
+    group = ["Setosa", "Versicolor", "Virginica"],
     markercolor = ["red", "blue", "black"],
     title = "Visualization",
     seriestype = :scatter,
 )
 
-anim = @animate for i ∈ (n_samples-100):n_samples
-  #  samples = reshape(rand(sample_dist), n, d)
+anim = @animate for i in 100:n_samples
+println(i)
   scatter!(plt, samples[1, 1:50, i], samples[2, 1:50, i], color="red", seriesalpha=0.1, label="")
   scatter!(plt, samples[1, 51:100, i], samples[2, 51:100, i], color="blue", seriesalpha=0.1, label="")
   scatter!(plt, samples[1, 101:150, i], samples[2, 101:150, i], color="black", seriesalpha=0.1, label="")
 end
-gif(anim, "anim_fps15.gif", fps = 1)
+gif(anim, "anim_fps_3.gif", fps = 3)
+```
 
+Here we see the density of the (normalized) projections from the chain to illustrate the uncertainty in the
+projections. Below, we show the same plot with un-normalized samples.
+
+We can see quite clearly that it is possible to separate Setosa from Versicolor and
+Virginica species, but that the latter two cannot be clearly separated based on the pPCA projection. This can be
+shown even more clearly by using a kernel density estimate and plotting the contours of that estimate.
+
+```julia
+# initialize a 3D plot with 1 empty series
+plt2 = plot(
+    [100, 200, 300],
+    xlim = (-10.00, 20.00),
+    ylim = (-10.00, 20.00),
+    group = ["Setosa", "Versicolor", "Virginica"],
+    markercolor = ["red", "blue", "black"],
+    title = "Visualization",
+    seriestype = :scatter,
+)
+
+anim_raw = @animate for i in 100:n_samples
+  println(i)
+  scatter!(plt2, samples_raw[1, 1:50, i], samples_raw[2, 1:50, i], color="red", seriesalpha=0.1, label="")
+  scatter!(plt2, samples_raw[1, 51:100, i], samples_raw[2, 51:100, i], color="blue", seriesalpha=0.1, label="")
+  scatter!(plt2, samples_raw[1, 101:150, i], samples_raw[2, 101:150, i], color="black", seriesalpha=0.1, label="")
+end
+gif(anim_raw, "anim_raw_fps_3.gif", fps = 3)
+```
+
+```julia
 # kernel density estimate
 using StatsPlots, KernelDensity
 dens = kde((vec(samples[1, :, :]),vec(samples[2, :, :])))
 StatsPlots.plot(dens)
-#
 ```
 
 ```julia, echo=false, skip="notebook"
