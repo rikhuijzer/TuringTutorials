@@ -428,13 +428,13 @@ end
 @model function pPCA_householder(x, K::Int, ::Type{T} = Float64) where {T}
 
   # Dimensionality of the problem.
-  N, D = size(x)
+  D, N = size(x)
   @assert K <= D
 
   # parameters
-  sigma_noise ~ Normal(1.0, 0.3)
+  sigma_noise ~ LogNormal(0.0, 0.5)
   v ~ filldist(Normal(0.0, 1.0), Int(D*K - K*(K-1)/2))
-  sigma ~ filldist(LogNormal(0, 1.0), K)
+  sigma ~ Bijectors.ordered(MvLogNormal(MvNormal(K, 1.0)))
 
   v_mat = zeros(T, D, K)
   v_mat[tril!(trues(size(v_mat)))] .= v
@@ -446,7 +446,7 @@ end
   Kmat = zeros(T, D, D)
   Kmat += W * W'
   for d in 1:D
-    Kmat[d,d] = Kmat[d, d] + sigma_noise^2 + 1e-6;
+    Kmat[d,d] = Kmat[d, d] + sigma_noise^2 + 1e-12;
   end
   L = LinearAlgebra.cholesky(Kmat).L
 
@@ -476,10 +476,11 @@ end
 end;
 
 # Dimensionality of latent space
+Random.seed!(1789);
 Q=2
-n_samples=400
-ppca_householder = pPCA_householder(dat, Q)
-chain = sample(ppca_householder, HMC(0.05, 30), n_samples);
+n_samples=700
+ppca_householder = pPCA_householder(Matrix(dat)', Q)
+chain = sample(ppca_householder, NUTS(), n_samples);
 
 # Extract mean of v from chain
 N,D = size(dat)
@@ -500,7 +501,7 @@ df_post[!,:species] = species
 df_post |> @vlplot(:point, x=:z1, y=:z2, color="species:n")
 ```
 
-We observe a speedup in inference, and similar results to the previous implementations. Finally, we will look at the uncertainity that is associated with the samples. We will do this by sampling from the posterior projections. In order to do so, we need to apply some normalizations to the projections.
+We observe a speedup in inference, and similar results to the previous implementations. Finally, we will look at the uncertainity that is associated with the samples. We will do this by sampling from the posterior projections. This is possible in the case of the rotation invariant version. If you are curious, you can try to plot the same thing in the case of classical pPCA.
 
 ```julia
 ## Create data projections for each step of chain
@@ -523,85 +524,42 @@ for d in 1:Q
   sigma[d,:] = Array(ss[d])
 end
 
-samples = Array{Float64}(undef, Q, N, n_samples)
 samples_raw = Array{Float64}(undef, Q, N, n_samples)
 for i in 1:n_samples
   U_ni = orthogonal_matrix(D, Q, vv_mat[i,:,:])
   W_ni = U_ni * (LinearAlgebra.I(Q) .* sigma[:,i])
   z_n = W_ni' * transpose(Matrix(dat))
-  samples[:,:,i] = z_n
-
-  # transform samples to unit range and align using an arbitrary reference point
-  ma = maximum(z_n); mi = minimum(z_n);
-  # normalize to -1, 1 range
-  z_norm_n = (((z_n .- mi) ./ (ma - mi)) .- 0.5) .* 2.
-  # project one point to (0,0)
-  align_vec_1 = [0, 0] - z_norm_n[:, 1]
-  z_norm_proj_n = z_norm_n .+ align_vec_1
-  # rotate around x axis
-  # angle Θ to x axis (atan(y,x))
-  θ = atan(z_norm_n[2,1], z_norm_n[1,1])
-  # rotation matrix
-  θ = -1. * θ # we rotate clockwise
-  rot = [[cos(θ), -sin(θ)] [sin(θ), cos(θ)]]
-  z_norm_proj_align_n = rot * z_norm_proj_n
-
   samples_raw[:,:,i] = z_n
-  samples[:,:,i] = z_norm_proj_align_n
 end
 
 # initialize a 3D plot with 1 empty series
 plt = plot(
     [100, 200, 300],
-    xlim = (-2.00, 2.00),
-    ylim = (-2.00, 2.00),
+    xlim = (-4.00, 7.00),
+    ylim = (-100.00, 0.00),
     group = ["Setosa", "Versicolor", "Virginica"],
     markercolor = ["red", "blue", "black"],
     title = "Visualization",
     seriestype = :scatter,
 )
 
-#anim = @animate for i in 100:n_samples
-anim = @gif for i=100:n_samples
-  scatter!(plt, samples[1, 1:50, i], samples[2, 1:50, i], color="red", seriesalpha=0.1, label="")
-  scatter!(plt, samples[1, 51:100, i], samples[2, 51:100, i], color="blue", seriesalpha=0.1, label="")
-  scatter!(plt, samples[1, 101:150, i], samples[2, 101:150, i], color="black", seriesalpha=0.1, label="")
-end every 3
-# gif(anim, "anim_fps_3.gif", fps = 3)
+anim = @animate for i=1:n_samples
+  scatter!(plt, samples_raw[1, 1:50, i], samples_raw[2, 1:50, i], color="red", seriesalpha=0.1, label="")
+  scatter!(plt, samples_raw[1, 51:100, i], samples_raw[2, 51:100, i], color="blue", seriesalpha=0.1, label="")
+  scatter!(plt, samples_raw[1, 101:150, i], samples_raw[2, 101:150, i], color="black", seriesalpha=0.1, label="")
+end
+gif(anim, "anim_fps.gif", fps = 5)
 ```
 
-Here we see the density of the (normalized) projections from the chain to illustrate the uncertainty in the
-projections. Below, we show the same plot with un-normalized samples.
-
-We can see quite clearly that it is possible to separate Setosa from Versicolor and
+Here we see the density of the projections from the chain to illustrate the uncertainty in the
+projections. We can see quite clearly that it is possible to separate Setosa from Versicolor and
 Virginica species, but that the latter two cannot be clearly separated based on the pPCA projection. This can be
 shown even more clearly by using a kernel density estimate and plotting the contours of that estimate.
 
 ```julia
-# initialize a 3D plot with 1 empty series
-plt2 = plot(
-    [100, 200, 300],
-    xlim = (-20.00, 20.00),
-    ylim = (-20.00, 20.00),
-    group = ["Setosa", "Versicolor", "Virginica"],
-    markercolor = ["red", "blue", "black"],
-    title = "Visualization",
-    seriestype = :scatter,
-)
-
-# anim_raw = @animate for i in 100:n_samples
-anim_raw = @gif for i=100:n_samples
-  scatter!(plt2, samples_raw[1, 1:50, i], samples_raw[2, 1:50, i], color="red", seriesalpha=0.1, label="")
-  scatter!(plt2, samples_raw[1, 51:100, i], samples_raw[2, 51:100, i], color="blue", seriesalpha=0.1, label="")
-  scatter!(plt2, samples_raw[1, 101:150, i], samples_raw[2, 101:150, i], color="black", seriesalpha=0.1, label="")
-end every 3
-# gif(anim_raw, "anim_raw_fps_3.gif", fps = 3)
-```
-
-```julia
 # kernel density estimate
 using StatsPlots, KernelDensity
-dens = kde((vec(samples[1, :, :]),vec(samples[2, :, :])))
+dens = kde((vec(samples_raw[1, :, :]),vec(samples_raw[2, :, :])))
 StatsPlots.plot(dens)
 ```
 
