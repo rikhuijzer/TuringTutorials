@@ -570,7 +570,7 @@ df_post |> @vlplot(:point, x=:z1, y=:z2, color="species:n")
 
 
 
-We observe a speedup in inference, and similar results to the previous implementations. Finally, we will look at the uncertainity that is associated with the samples. We will do this by sampling from the posterior projections. In order to do so, we need to apply some normalizations to the projections.
+We observe a speedup in inference, and similar results to the previous implementations. Finally, we will look at the uncertainity that is associated with the samples. We will do this by sampling from the posterior projections. This is possible in the case of the rotation invariant version. If you are curious, you can try to plot the same thing in the case of classical pPCA.
 
 ```julia
 ## Create data projections for each step of chain
@@ -624,10 +624,8 @@ gif(anim, "anim_fps.gif", fps = 5)
 
 
 
-Here we see the density of the (normalized) projections from the chain to illustrate the uncertainty in the
-projections. Below, we show the same plot with un-normalized samples.
-
-We can see quite clearly that it is possible to separate Setosa from Versicolor and
+Here we see the density of the projections from the chain to illustrate the uncertainty in the
+projections. We can see quite clearly that it is possible to separate Setosa from Versicolor and
 Virginica species, but that the latter two cannot be clearly separated based on the pPCA projection. This can be
 shown even more clearly by using a kernel density estimate and plotting the contours of that estimate.
 
