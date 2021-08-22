@@ -1,0 +1,55 @@
+        - using Test
+        - using TuringTutorials
+        - 
+        - function cleanup_folder(folder::String)
+        2     dir = tutorial_path(folder)
+        2     rm(dir; force=true, recursive=true)
+        2     mkpath(dir)
+        - end
+        - 
+        2 function write_test_tutorial(folder::String, should_fail::Bool)
+        2     cleanup_folder(folder)
+        -     # The assertion tests whether we can use assertions to verify the tutorial output.
+        2     jmd = """
+        -         ---
+        -         title: This tutorial should $(should_fail ? "fail" : "pass")
+        -         ---
+        - 
+        -         ```julia
+        -         x = 1 + 1
+        -         ```
+        - 
+        -         ```julia; echo=false
+        -         $(should_fail ? "@assert x == 3" : "@assert x == 2")
+        -         ```
+        -         """
+        - 
+        2     filename = folder2filename(folder)
+        2     path = joinpath(tutorial_path(folder), "$filename.jmd")
+        2     write(path, jmd)
+        - end
+        - 
+        1 function remove_test_files(test_folder)
+        1     for dir in ["html", "markdown", "notebook", "script", "tutorials"]
+        5         test_path = joinpath(TuringTutorials.REPO_DIR, dir, test_folder)
+        5         rm(test_path; force=true, recursive=true)
+        -     end
+        - end
+        - 
+        - @testset "build.jl" begin
+        -     test_folder = "99-test"
+        - 
+        -     should_fail = false
+        -     write_test_tutorial(test_folder, should_fail)
+        -     @test build(test_folder)
+        -     markdown = TuringTutorials.markdown_output(test_folder)
+        -     @test contains(markdown, "2")
+        - 
+        -     should_fail = true
+        -     write_test_tutorial(test_folder, should_fail)
+        -     @test !build(test_folder)
+        - 
+        -     remove_test_files(test_folder)
+        -     dir = joinpath(TuringTutorials.REPO_DIR, "html", test_folder)
+        -     @test !isdir(dir)
+        - end

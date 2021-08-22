@@ -1,0 +1,116 @@
+        - const REPO_URL = "https://github.com/TuringLang/TuringTutorials"
+        - const CLONED_DIR = joinpath(REPO_DIR, "ClonedTuringTutorials")
+        - 
+        - """
+        -     clean_weave_cache()
+        - 
+        - On the one hand, we need `cache = :all` to have quick builds.
+        - On the other hand, we don't need cache files committed to the repo which break the build.
+        - Therefore, this method manually cleans the cache just to be sure.
+        - """
+        4 function clean_weave_cache()
+       12     for (root, dirs, files) in walkdir(pkgdir(TuringTutorials); onerror=x->())
+     1648         if "cache" in dirs
+        4             cache_dir = joinpath(root, "cache")
+        4             rm(cache_dir; force=true, recursive=true)
+        -         end
+        -     end
+        - end
+        - 
+        - """
+        -     clone_tutorials_output()
+        - 
+        - Ensure that `$CLONED_DIR` exists and contains the latest commit from the output branch for `$REPO_URL`.
+        - """
+        1 function clone_tutorials_output()
+        1     branch = "artifacts"
+        3     args = [
+        -         "clone",
+        -         "--depth=1",
+        -         "--branch=$branch"
+        -     ]
+        1     if isdir(CLONED_DIR)
+        0         try
+        0             cd(CLONED_DIR) do
+        0                 run(`git checkout $branch`)
+        0                 run(`git pull --ff --allow-unrelated-histories`)
+        -             end
+        -         catch
+        0             rm(CLONED_DIR; recursive=true, force=true)
+        0             run(`git $args $REPO_URL $CLONED_DIR`)
+        0             cd(CLONED_DIR) do
+        0                 run(`git checkout $branch`)
+        -             end
+        -         end
+        -     else
+        1         run(`git $args $REPO_URL $CLONED_DIR`)
+        -     end
+        - end
+        - 
+        - """
+        -     download_artifacts()
+        - 
+        - Explicitly copy all the updated tutorials from the artifacts branch.
+        - This allows orphaning the artifacts branch on each deploy to ease debugging, cleanup old and
+        - unused files, and have a smaller branch.
+        - """
+        2 function download_artifacts()
+        2     if !isdir(CLONED_DIR)
+        1         clone_tutorials_output()
+        -     end
+        2     T = tutorials()
+        2     for tutorial in T
+       20         for dir in ["html", "markdown", "notebook", "script"]
+       80             from_dir = joinpath(CLONED_DIR, dir, tutorial)
+       80             to_dir = joinpath(REPO_DIR, dir, tutorial)
+       80             mkpath(to_dir)
+       80             cp(from_dir, to_dir; force=true)
+        -         end
+        -     end
+        - end
+        - 
+        - 
+        - function file_changed(old_dir, new_dir, file)
+        -     old_path = joinpath(old_dir, file)
+        -     new_path = joinpath(new_dir, file)
+        -     old = read(old_path, String)
+        -     new = isfile(new_path) ? read(new_path, String) : ""
+        -     return old != new
+        - end
+        - 
+        - """
+        -     any_changes(tutorial::String)
+        - 
+        - Return whether there are any changes for the local source files, such as `.jmd` and `Manifest.toml`,
+        - compared to the files in `$CLONED_DIR`.
+        - """
+        - function any_changes(tutorial::String)
+        -     old_dir = joinpath(CLONED_DIR, "tutorials", tutorial)
+        -     new_dir = joinpath(REPO_DIR, "tutorials", tutorial)
+        -     if isdir(old_dir)
+        -         files = readdir(old_dir)
+        -         files = filter(!=(WEAVE_LOG_FILE), files)
+        -         return any(file_changed.(old_dir, new_dir, files))
+        -     else
+        -         # A newly added tutorial.
+        -         return true
+        -     end
+        - end
+        - 
+        - """
+        -     changed_tutorials()
+        - 
+        - Return the tutorials which have changed compared to the output branch at $REPO_URL.
+        - """
+        - function changed_tutorials()
+        -     clone_tutorials_output()
+        -     T = tutorials()
+        -     changed = filter(any_changes, T)
+        -     n = length(changed)
+        -     println("Found changes for the tutorials $changed ($(n)/$(length(T)))")
+        -     if length(T) == 0
+        -         changed = first(T)
+        -         println("Running the first tutorial to be able to verify that the CI job works.")
+        -     end
+        -     changed
+        - end
